@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Quadro Técnico Interativo - Versão Ortogonalizada</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -73,7 +74,7 @@
         .popup button:hover { background: #007bff; color: white; border-color: #007bff; }
         .popup button.active { background: #2c3e50; color: white; font-weight: bold; }
         .picker-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-size: 12px; }
-        .picker-row input type="color" { cursor: pointer; width: 40px; height: 25px; border: none; padding: 0; }
+        .picker-row input[type="color"] { cursor: pointer; width: 40px; height: 25px; border: none; padding: 0; }
         .picker-row input[type="number"] { width: 50px; padding: 2px; }
         .btn-desfazer { background: #f1c40f !important; color: #333 !important; font-weight: bold; text-align: center !important; }
         .btn-desfazer:hover { background: #d4ac0d !important; }
@@ -89,7 +90,7 @@
     <button id="btnCaptura" class="btn-global" onclick="alternarModoCaptura()">📷 Ativar Captura [C]</button>
     <button class="btn-global" style="background: #7f8c8d; color: white;" onclick="resetarZoom()">Reset Zoom/Pan</button>
 </div>
-<div id="info">Recursos: Linhas próximas a 90° ou horizontais alinham-se automaticamente para eliminar imperfeições visuais.</div>
+<div id="info">Sincronizando com o banco de dados...</div>
 
 <div id="canvasContainer">
     <canvas id="canvas" width="1000" height="600"></canvas>
@@ -124,6 +125,14 @@
 </div>
 
 <script>
+// CONFIGURAÇÕES DO SEU SUPABASE
+const SUPABASE_URL = "https://cqrvdyedsidphcbnpqdy.supabase.co"; 
+const SUPABASE_ANON_KEY = "sb_publishable_ZtwZD4BrBMI_-_CcpjjEFw_v5k8lHqo";
+const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ID fixo do quadro para salvar tudo em uma única linha persistente no banco
+const ID_QUADRO = "quadro_principal";
+
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 const info = document.getElementById('info');
@@ -163,7 +172,91 @@ let arrastandoGripImagem = null;
 const RAIO_PONTO = 6;
 const RAIO_GRIP_IMG = 7;
 
-// 3. REGRA DE ALINHAMENTO AUTOMÁTICO PARA EVITAR LINHAS TORTAS (90 GRAUS / ORTOGONALIDADE)
+// FUNÇÕES DE SINCRONIZAÇÃO COM O SUPABASE
+async function salvarNoSupabase() {
+    info.innerText = "Salvando alterações no banco de dados...";
+    
+    // Converte imagens estruturadas em texto Base64 para salvar no JSON do banco
+    const imagensSalvaveis = imagens.map(img => ({
+        src: img.imgElement.src,
+        x: img.x,
+        y: img.y,
+        w: img.w,
+        h: img.h,
+        ratio: img.ratio
+    }));
+
+    const { error } = await supabase
+        .from('quadros')
+        .upsert({
+            id: ID_QUADRO,
+            linhas: linhas,
+            textos: textos,
+            imagens: imagensSalvaveis,
+            updated_at: new Date().toISOString()
+        });
+
+    if (error) {
+        console.error("Erro ao salvar:", error);
+        info.innerText = "Erro ao salvar dados na nuvem.";
+    } else {
+        info.innerText = "Quadro salvo e sincronizado na nuvem com sucesso!";
+    }
+}
+
+async function carregarDoSupabase() {
+    info.innerText = "Carregando dados do servidor...";
+    const { data, error } = await supabase
+        .from('quadros')
+        .select('*')
+        .eq('id', ID_QUADRO)
+        .single();
+
+    if (error && error.code !== 'PGRST116') {
+        console.error("Erro ao carregar:", error);
+        info.innerText = "Erro ao carregar dados do servidor.";
+        return;
+    }
+
+    if (data) {
+        linhas = data.linhas || [];
+        textos = data.textos || [];
+        
+        // Reconstrói objetos de imagem a partir do src/Base64 guardado
+        const imagensCarregadas = data.imagens || [];
+        imagens = [];
+        
+        let carregadasCount = 0;
+        if (imagensCarregadas.length === 0) {
+            info.innerText = "Quadro pronto! Desenhe ou cole imagens (Ctrl+V).";
+            desenhar();
+        }
+
+        imagensCarregadas.forEach(imgData => {
+            const imgElement = new Image();
+            imgElement.src = imgData.src;
+            imgElement.onload = () => {
+                imagens.push({
+                    imgElement: imgElement,
+                    x: imgData.x,
+                    y: imgData.y,
+                    w: imgData.w,
+                    h: imgData.h,
+                    ratio: imgData.ratio
+                });
+                carregadasCount++;
+                if (carregadasCount === imagensCarregadas.length) {
+                    info.innerText = "Quadro carregado com sucesso!";
+                    desenhar();
+                }
+            };
+        });
+    } else {
+        info.innerText = "Nenhum dado anterior encontrado. Quadro inicializado limpo!";
+    }
+    desenhar();
+}
+
 function aplicarAlinhamentoOrtogonal(pontoFixo, pontoMovel) {
     const dx = pontoMovel.x - pontoFixo.x;
     const dy = pontoMovel.y - pontoFixo.y;
@@ -171,20 +264,17 @@ function aplicarAlinhamentoOrtogonal(pontoFixo, pontoMovel) {
     let anguloGraus = anguloRad * (180 / Math.PI);
     if (anguloGraus < 0) anguloGraus += 360;
 
-    const limiarTolerancia = 6; // Graus de proximidade para forçar atração magnética
+    const limiarTolerancia = 6; 
 
-    // Verifica proximidade de 0°/360° ou 180° (Linhas Horizontais Perfeitas)
     if (Math.abs(anguloGraus - 0) < limiarTolerancia || Math.abs(anguloGraus - 360) < limiarTolerancia || Math.abs(anguloGraus - 180) < limiarTolerancia) {
         pontoMovel.y = pontoFixo.y;
     }
-    // Verifica proximidade de 90° ou 270° (Linhas Verticais Perfeitas)
     else if (Math.abs(anguloGraus - 90) < limiarTolerancia || Math.abs(anguloGraus - 270) < limiarTolerancia) {
         pontoMovel.x = pontoFixo.x;
     }
     return pontoMovel;
 }
 
-// SALVAR ESTADO (MEMENTO)
 function salvarEstado() {
     const estado = {
         linhas: JSON.parse(JSON.stringify(linhas)),
@@ -202,11 +292,12 @@ function desfazer() {
         imagens = penultimoEstado.imagens;
         textos = penultimoEstado.textos;
         linhaSelecionada = null; textoSelecionado = null; imagemSelecionada = null;
-        fecharPopups(); desenhar();
+        fecharPopups(); 
+        desenhar();
+        salvarNoSupabase();
     }
 }
 
-// ZOOM MOUSE WHEEL
 canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
     const rect = canvas.getBoundingClientRect();
@@ -227,11 +318,11 @@ canvas.addEventListener('wheel', (e) => {
 function resetarZoom() { zoom = 1.0; offsetX = 0; offsetY = 0; desenhar(); }
 canvas.addEventListener('contextmenu', (e) => { if (modo === 'pan') e.preventDefault(); });
 
-// MOUSEDOWN
 canvas.addEventListener('mousedown', (e) => {
     if (e.button === 1) {
         e.preventDefault();
         modoAnteriorAoPan = modo; modo = 'pan';
+        maxPanX = e.clientX; maxPanY = e.clientY;
         ultimasCoordenadasMousePan = { x: e.clientX, y: e.clientY };
         canvas.style.cursor = 'grabbing'; fecharPopups(); return;
     }
@@ -252,7 +343,6 @@ canvas.addEventListener('mousedown', (e) => {
 
     if (modo === 'criando_fim') {
         salvarEstado();
-        // Aplica o ajuste de 90° ao fechar a criação do segmento
         let ajustado = { x: posMundo.x, y: posMundo.y };
         ajustado = aplicarAlinhamentoOrtogonal(novaLinhaStart, ajustado);
 
@@ -261,7 +351,9 @@ canvas.addEventListener('mousedown', (e) => {
             pontos: [ { x: novaLinhaStart.x, y: novaLinhaStart.y }, { x: ajustado.x, y: ajustado.y } ]
         };
         linhas.push(novaLinha); linhaSelecionada = novaLinha;
-        sairParaModoSelecao(); abrirPopupLinha(e.clientX, e.clientY); return;
+        sairParaModoSelecao(); abrirPopupLinha(e.clientX, e.clientY); 
+        salvarNoSupabase();
+        return;
     }
 
     if (modo === 'criando_texto') {
@@ -274,6 +366,7 @@ canvas.addEventListener('mousedown', (e) => {
             };
             textos.push(novoTextoObj); textoSelecionado = novoTextoObj;
             sairParaModoSelecao(); abrirPopupTexto(e.clientX, e.clientY);
+            salvarNoSupabase();
         } else { sairParaModoSelecao(); }
         return;
     }
@@ -294,7 +387,7 @@ canvas.addEventListener('mousedown', (e) => {
 
         if (linhaSelecionada) {
             for (let i = 0; i < linhaSelecionada.pontos.length; i++) {
-                let p = linhaSelecionada.pontos[i];
+                let p = Appento = linhaSelecionada.pontos[i];
                 if (Math.hypot(p.x - posMundo.x, p.y - posMundo.y) < (RAIO_PONTO * 1.5) / zoom) {
                     salvarEstado(); arrastandoPonto = { SecretLinha: linhaSelecionada, index: i };
                     fecharPopups(); return;
@@ -347,7 +440,6 @@ canvas.addEventListener('mousedown', (e) => {
     }
 });
 
-// MOUSEMOVE
 canvas.addEventListener('mousemove', (e) => {
     const posBruta = getMousePosBruta(e);
     mousePos = posBruta; 
@@ -382,7 +474,6 @@ canvas.addEventListener('mousemove', (e) => {
         let idx = arrastandoPonto.index;
         let pontoMovel = { x: posMundo.x, y: posMundo.y };
         
-        // Aplica correção ortogonal (90 graus) em relação ao ponto vizinho se houver
         if (idx > 0) {
             pontoMovel = aplicarAlinhamentoOrtogonal(l.pontos[idx - 1], pontoMovel);
         } else if (idx < l.pontos.length - 1) {
@@ -412,7 +503,16 @@ canvas.addEventListener('mouseup', () => {
         modo = modoAnteriorAoPan;
         return;
     }
-    if (modo === 'captura_arrasto') processarEBaixarCaptura();
+    if (modo === 'captura_arrasto') {
+        processarEBaixarCaptura();
+        return;
+    }
+    
+    // Se soltar algum elemento que estava sendo arrastado ou redimensionado, sincroniza com o banco
+    if(arrastandoPonto || elementoArrastandoGeral || arrastandoGripImagem) {
+        salvarNoSupabase();
+    }
+
     arrastandoPonto = null; elementoArrastandoGeral = null; arrastandoGripImagem = null; tipoElementoArrastando = '';
 });
 
@@ -449,15 +549,22 @@ window.addEventListener('paste', (e) => {
     for (let item of items) {
         if (item.type.indexOf('image') !== -1) {
             const blob = item.getAsFile();
-            const imgElement = new Image();
-            imgElement.src = URL.createObjectURL(blob);
-            imgElement.onload = () => {
-                salvarEstado();
-                const mundoMouse = converterTelaParaMundo(mousePos.x, mousePos.y);
-                const w = imgElement.width * 0.5; const h = imgElement.height * 0.5;
-                imagens.push({ imgElement: imgElement, x: mundoMouse.x - w/2, y: mundoMouse.y - h/2, w: w, h: h, ratio: w/h });
-                desenhar();
+            const reader = new FileReader();
+            
+            // Converte a imagem colada em Base64 para garantir armazenamento seguro no JSON
+            reader.onload = (event) => {
+                const imgElement = new Image();
+                imgElement.src = event.target.result;
+                imgElement.onload = () => {
+                    salvarEstado();
+                    const mundoMouse = converterTelaParaMundo(mousePos.x, mousePos.y);
+                    const w = imgElement.width * 0.5; const h = imgElement.height * 0.5;
+                    imagens.push({ imgElement: imgElement, x: mundoMouse.x - w/2, y: mundoMouse.y - h/2, w: w, h: h, ratio: w/h });
+                    desenhar();
+                    salvarNoSupabase();
+                };
             };
+            reader.readAsDataURL(blob);
         }
     }
 });
@@ -488,12 +595,24 @@ function mudarTipoLinha(tipo) {
             linhaSelecionada.pontos = [linhaSelecionada.pontos[0], linhaSelecionada.pontos[linhaSelecionada.pontos.length - 1]];
         }
         desenhar();
+        salvarNoSupabase();
     }
 }
-function mudarCorLinha(novaCor) { if (linhaSelecionada) { linhaSelecionada.cor = novaCor; desenhar(); } }
-function mudarPropriedadesTexto(propriedade, valor) { if (textoSelecionado) { textoSelecionado[propriedade] = valor; desenhar(); } }
+function mudarCorLinha(novaCor) { 
+    if (linhaSelecionada) { 
+        linhaSelecionada.cor = novaCor; 
+        desenhar(); 
+        salvarNoSupabase();
+    } 
+}
+function mudarPropriedadesTexto(propriedade, valor) { 
+    if (textoSelecionado) { 
+        textoSelecionado[propriedade] = valor; 
+        desenhar(); 
+        salvarNoSupabase();
+    } 
+}
 
-// ENGINE DE RENDERIZAÇÃO
 function renderizarCenario(contexto, largura, altura, panX = 0, panY = 0, escalaGeral = 1) {
     contexto.fillStyle = '#ffffff'; contexto.fillRect(0, 0, largura, altura);
     contexto.save(); contexto.translate(panX, panY); contexto.scale(escalaGeral, escalaGeral);
@@ -538,7 +657,7 @@ function renderizarCenario(contexto, largura, altura, panX = 0, panY = 0, escala
         contexto.beginPath();
         contexto.strokeStyle = ehSelecionada ? '#111' : (linha.cor || '#555555');
         contexto.lineWidth = ehSelecionada ? 5 : 3;
-        contexto.moveTo(linha.pontos[0].x, linha.pontos[0].y);
+        contexto.moveTo(linha.pontos[0].x, static = linha.pontos[0].y);
         for (let i = 1; i < linha.pontos.length; i++) { contexto.lineTo(linha.pontos[i].x, linha.pontos[i].y); }
         contexto.stroke();
 
@@ -564,7 +683,6 @@ function desenhar() {
         const telaStart = { x: novaLinhaStart.x * zoom + offsetX, y: novaLinhaStart.y * zoom + offsetY };
         ctx.moveTo(telaStart.x, telaStart.y);
         
-        // No preview visual em tempo real do desenho da linha, também exibe a atração magnética de 90°
         let mundoMousePos = converterTelaParaMundo(mousePos.x, mousePos.y);
         let mundoAjustado = aplicarAlinhamentoOrtogonal(novaLinhaStart, { x: mundoMousePos.x, y: mundoMousePos.y });
         let telaAjustadaX = mundoAjustado.x * zoom + offsetX;
@@ -599,7 +717,8 @@ function processarEBaixarCaptura() {
     sairParaModoSelecao();
 }
 
-desenhar();
+// Inicializa chamando os dados do Supabase assim que a página abre
+carregarDoSupabase();
 </script>
 </body>
 </html>
