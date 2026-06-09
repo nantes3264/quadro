@@ -45,10 +45,13 @@
     </div>
 
     <script>
+        // Configurações usando o novo padrão de chaves assimétricas do Supabase
         const SUPABASE_URL = "https://cqrvdyedsidphcbnpqdy.supabase.co"; 
-        const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNxcnZkeWVkc2lkcGhjYm5wcWR5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MTU5MjkxNzMsImV4cCI6MjAyOTUwNTE3M30.bS8p6t_5nO0tVIdZ0Lp2j97X1x5hYfT3nE0H_D4lU-8"; 
+        const SUPABASE_KEY = "sb_publishable_ZtwZD4BrBMI_-_CcpjjEFw_v5k8lHqo"; 
 
+        // Inicializa o cliente uma única vez com escopo global limpo
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
         const canvas = document.getElementById('paintCanvas');
         const ctx = canvas.getContext('2d');
         const container = document.getElementById('canvas-container');
@@ -186,7 +189,7 @@
             const { data, error } = await supabase.from('quadro_elementos').select('*');
             if (error) {
                 console.error("Erro Supabase:", error);
-                updateStatus('offline', 'Acesso Recusado');
+                updateStatus('offline', 'Erro na API');
             } else if (data) {
                 boardElements = data.map(item => ({
                     id: item.element_id, type: item.type, color: item.color, thickness: item.thickness,
