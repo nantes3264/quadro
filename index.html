@@ -155,11 +155,12 @@
     </div>
 
     <script>
-        // Configurações do Supabase injetadas diretamente com as suas chaves
+        // Configurações da URL do seu projeto e campo para sua chave Real do Supabase
         const SUPABASE_URL = "https://cqrvdyedsidphcbnpqdy.supabase.co"; 
-        const SUPABASE_KEY = "sb_publishable_ZtwZD4BrBMI_-_CcpjjEFw_v5k8lHqo"; 
+        const SUPABASE_KEY = "COLE_AQUI_SUA_CHAVE_ANON_QUE_COMECA_COM_EY"; 
 
-        const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        // Inicializa o cliente Supabase de forma segura
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
         // Elementos do DOM
         const canvas = document.getElementById('paintCanvas');
@@ -412,7 +413,7 @@
             const { data, error } = await supabase.from('quadro_elementos').select('*');
             if (error) {
                 console.error(error);
-                updateStatus('offline', 'Erro ao carregar dados. Verifique a tabela.');
+                updateStatus('offline', 'Erro ao carregar dados. Verifique a chave.');
             } else if (data) {
                 boardElements = data.map(item => ({
                     id: item.element_id,
@@ -437,8 +438,8 @@
                 pontos: JSON.stringify(el.pontos),
                 content: el.content
             }]);
-            if (error) updateStatus('offline', 'Erro de conexão ao salvar');
-            else updateStatus('online', 'Salvo com sucesso');
+            if (error) updateStatus('offline', 'Erro ao salvar dados');
+            else updateStatus('online', 'Sincronizado');
         }
 
         async function deleteElementFromSupabase(id) {
