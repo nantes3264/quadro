@@ -8,14 +8,21 @@
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; touch-action: none; }
         body { font-family: sans-serif; background-color: #1e1e1e; color: #fff; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+        
+        /* Barra de Ferramentas */
         #toolbar { background-color: #252526; padding: 10px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #3c3c3c; z-index: 10; flex-wrap: wrap; }
-        button, select, input[type="color"] { background-color: #3e3e3e; color: white; border: 1px solid #555; padding: 6px 12px; border-radius: 4px; cursor: pointer; }
+        button, select, input[type="color"] { background-color: #3e3e3e; color: white; border: 1px solid #555; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        button:hover { background-color: #4e4e4e; }
         button.active { background-color: #007acc; border-color: #0098ff; }
+        
+        /* Indicador de Status de Conexão */
         #status-container { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 13px; }
         .status-dot { width: 10px; height: 10px; border-radius: 50%; background-color: gray; transition: background 0.3s; }
         .status-online { background-color: #4ecc71; }
         .status-syncing { background-color: #f1c40f; }
         .status-offline { background-color: #e74c3c; }
+        
+        /* Área do Canvas */
         #canvas-container { flex: 1; position: relative; background-color: #1e1e1e; width: 100%; height: 100%; }
         canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; z-index: 1; }
     </style>
@@ -27,13 +34,17 @@
         <button id="tool-line" onclick="setTool('line')">Linha Reta</button>
         <button id="tool-rect" onclick="setTool('rect')">Retângulo</button>
         <button id="tool-erase" onclick="setTool('erase')">Borracha</button>
-        <input type="color" id="prop-color" value="#ffffff">
-        <select id="prop-thickness">
+        
+        <input type="color" id="prop-color" value="#ffffff" title="Cor do traço">
+        
+        <select id="prop-thickness" title="Espessura do traço">
             <option value="2">Fino</option>
             <option value="5" selected>Médio</option>
             <option value="10">Grosso</option>
         </select>
-        <button onclick="clearBoard()" style="background-color: #5a1d1d;">Limpar Tudo</button>
+        
+        <button onclick="clearBoard()" style="background-color: #5a1d1d; border-color: #7a2d2d;">Limpar Tudo</button>
+        
         <div id="status-container">
             <div id="status-indicator" class="status-dot status-offline"></div>
             <span id="status-text">Conectando...</span>
@@ -45,37 +56,43 @@
     </div>
 
     <script>
-        // Configurações usando o novo padrão de chaves assimétricas do Supabase
+        // Parâmetros de autenticação baseados no gateway atualizado do Supabase
         const SUPABASE_URL = "https://cqrvdyedsidphcbnpqdy.supabase.co"; 
         const SUPABASE_KEY = "sb_publishable_ZtwZD4BrBMI_-_CcpjjEFw_v5k8lHqo"; 
 
-        // Inicializa o cliente uma única vez com escopo global limpo
+        // Inicialização do cliente Supabase de escopo global único
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-
+        
+        // Elementos do DOM
         const canvas = document.getElementById('paintCanvas');
         const ctx = canvas.getContext('2d');
         const container = document.getElementById('canvas-container');
         const statusIndicator = document.getElementById('status-indicator');
         const statusText = document.getElementById('status-text');
 
+        // Estados internos da aplicação
         let currentTool = 'draw'; 
         let config = { color: '#ffffff', thickness: 5 };
         let isDrawing = false;
         let activeElementId = null;
         let boardElements = [];
 
+        // Inicialização do sistema
         function init() {
             resizeCanvas();
             window.addEventListener('resize', resizeCanvas);
             setupInputEvents();
             
+            // Ouvintes para modificações de propriedades dinâmicas
             document.getElementById('prop-color').addEventListener('change', (e) => config.color = e.target.value);
             document.getElementById('prop-thickness').addEventListener('change', (e) => config.thickness = parseInt(e.target.value));
             
+            // Sincronização inicial e ativação de escuta em tempo real
             loadElementsFromSupabase();
             subscribeToChanges();
         }
 
+        // Atualização visual do painel de conectividade
         function updateStatus(type, message) {
             statusIndicator.className = 'status-dot';
             if (type === 'online') statusIndicator.classList.add('status-online');
@@ -84,29 +101,37 @@
             statusText.innerText = message;
         }
 
+        // Redimensionamento inteligente do Canvas à resolução da janela
         function resizeCanvas() {
             canvas.width = container.clientWidth;
             canvas.height = container.clientHeight;
             render();
         }
 
+        // Troca de ferramentas ativas na UI
         function setTool(tool) {
             currentTool = tool;
             document.querySelectorAll('#toolbar button').forEach(b => b.classList.remove('active'));
-            document.getElementById(`tool-${tool}`).classList.add('active');
+            const activeBtn = document.getElementById(`tool-${tool}`);
+            if (activeBtn) activeBtn.classList.add('active');
         }
 
+        // Renderização dos vetores geométricos salvos em memória
         function render() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
+            
             boardElements.forEach(el => {
                 ctx.strokeStyle = el.color;
                 ctx.lineWidth = el.thickness;
+                
                 if ((el.type === 'draw' || el.type === 'line') && el.pontos.length > 0) {
                     ctx.beginPath();
                     ctx.moveTo(el.pontos[0].x, el.pontos[0].y);
-                    for (let i = 1; i < el.pontos.length; i++) ctx.lineTo(el.pontos[i].x, el.pontos[i].y);
+                    for (let i = 1; i < el.pontos.length; i++) {
+                        ctx.lineTo(el.pontos[i].x, el.pontos[i].y);
+                    }
                     ctx.stroke();
                 } else if (el.type === 'rect' && el.pontos.length >= 2) {
                     const p1 = el.pontos[0];
@@ -116,6 +141,7 @@
             });
         }
 
+        // Normalização de coordenadas para mouses e telas touch
         function getEventPos(e) {
             const rect = canvas.getBoundingClientRect();
             if (e.touches && e.touches.length > 0) {
@@ -124,12 +150,23 @@
             return { x: e.clientX - rect.left, y: e.clientY - rect.top };
         }
 
+        // Handlers de Eventos de Desenho
         function onStart(e) {
             const pos = getEventPos(e);
-            if (currentTool === 'erase') { eraseElementAt(pos); return; }
+            if (currentTool === 'erase') { 
+                eraseElementAt(pos); 
+                return; 
+            }
+            
             isDrawing = true;
             activeElementId = 'el_' + Date.now();
-            const newElement = { id: activeElementId, type: currentTool, color: config.color, thickness: config.thickness, pontos: [pos] };
+            const newElement = { 
+                id: activeElementId, 
+                type: currentTool, 
+                color: config.color, 
+                thickness: config.thickness, 
+                pontos: [pos] 
+            };
             boardElements.push(newElement);
             render();
         }
@@ -139,8 +176,10 @@
             const pos = getEventPos(e);
             const el = boardElements.find(item => item.id === activeElementId);
             if (!el) return;
-            if (currentTool === 'draw') el.pontos.push(pos);
-            else if (currentTool === 'line' || currentTool === 'rect') {
+            
+            if (currentTool === 'draw') {
+                el.pontos.push(pos);
+            } else if (currentTool === 'line' || currentTool === 'rect') {
                 if (el.pontos.length > 1) el.pontos.pop();
                 el.pontos.push(pos);
             }
@@ -155,44 +194,56 @@
             activeElementId = null;
         }
 
+        // Configuração de Eventos de Captura (Mouse + Touch)
         function setupInputEvents() {
             canvas.addEventListener('mousedown', onStart);
             canvas.addEventListener('mousemove', onMove);
             window.addEventListener('mouseup', onEnd);
-            canvas.addEventListener('touchstart', onStart);
-            canvas.addEventListener('touchmove', onMove);
+            
+            canvas.addEventListener('touchstart', onStart, { passive: true });
+            canvas.addEventListener('touchmove', onMove, { passive: true });
             window.addEventListener('touchend', onEnd);
         }
 
+        // Sistema de Remoção Vetorial (Borracha por proximidade)
         function eraseElementAt(pos) {
             let foundIndex = boardElements.findIndex(el => {
                 return el.pontos.some(p => Math.hypot(p.x - pos.x, p.y - pos.y) < el.thickness + 15);
             });
+            
             if (foundIndex !== -1) {
                 const targetId = boardElements[foundIndex].id;
                 boardElements.splice(foundIndex, 1);
                 render();
-                supabase.from('quadro_elementos').delete().eq('element_id', targetId);
+                supabase.from('quadro_elementos').delete().eq('element_id', targetId)
+                    .then(({ error }) => { if (error) console.error("Erro ao apagar:", error); });
             }
         }
 
+        // Limpeza global do banco de dados
         function clearBoard() {
-            if (confirm("Limpar quadro para todos?")) {
+            if (confirm("Deseja limpar o quadro para todos os usuários sincronizados?")) {
                 boardElements = [];
                 render();
-                supabase.from('quadro_elementos').delete().neq('id', '0');
+                supabase.from('quadro_elementos').delete().neq('element_id', '0')
+                    .then(({ error }) => { if (error) console.error("Erro ao limpar:", error); });
             }
         }
 
+        // Sincronização e Busca REST no Supabase
         async function loadElementsFromSupabase() {
             updateStatus('syncing', 'Conectando...');
             const { data, error } = await supabase.from('quadro_elementos').select('*');
+            
             if (error) {
-                console.error("Erro Supabase:", error);
+                console.error("Erro de requisição Supabase:", error);
                 updateStatus('offline', 'Erro na API');
             } else if (data) {
                 boardElements = data.map(item => ({
-                    id: item.element_id, type: item.type, color: item.color, thickness: item.thickness,
+                    id: item.element_id, 
+                    type: item.type, 
+                    color: item.color, 
+                    thickness: item.thickness,
                     pontos: typeof item.pontos === 'string' ? JSON.parse(item.pontos) : item.pontos
                 }));
                 render();
@@ -200,13 +251,19 @@
             }
         }
 
+        // Inserção assíncrona de novos elementos no banco de dados
         async function saveElementToSupabase(el) {
             const { error } = await supabase.from('quadro_elementos').insert([{
-                element_id: el.id, type: el.type, color: el.color, thickness: el.thickness, pontos: JSON.stringify(el.pontos)
+                element_id: el.id, 
+                type: el.type, 
+                color: el.color, 
+                thickness: el.thickness, 
+                pontos: JSON.stringify(el.pontos)
             }]);
-            if (error) console.error("Erro ao salvar:", error);
+            if (error) console.error("Erro ao salvar vetor:", error);
         }
 
+        // Canal de Escuta WebSocket em Tempo Real (Realtime Engine)
         function subscribeToChanges() {
             supabase.channel('quadro-channel')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'quadro_elementos' }, () => {
@@ -214,6 +271,7 @@
             }).subscribe();
         }
 
+        // Gatilho de Inicialização Global da Janela
         window.onload = init;
     </script>
 </body>
