@@ -3,17 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Quadro Técnico</title>
+    <title>Quadro Técnico Compartilhado</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; touch-action: none; }
         body { font-family: sans-serif; background-color: #1e1e1e; color: #fff; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
-        #toolbar { background-color: #252526; padding: 10px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #3c3c3c; z-index: 10; }
+        #toolbar { background-color: #252526; padding: 10px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #3c3c3c; z-index: 10; flex-wrap: wrap; }
         button, select, input[type="color"] { background-color: #3e3e3e; color: white; border: 1px solid #555; padding: 6px 12px; border-radius: 4px; cursor: pointer; }
         button.active { background-color: #007acc; border-color: #0098ff; }
         #status-container { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 13px; }
-        .status-dot { width: 10px; height: 10px; border-radius: 50%; background-color: gray; }
+        .status-dot { width: 10px; height: 10px; border-radius: 50%; background-color: gray; transition: background 0.3s; }
         .status-online { background-color: #4ecc71; }
+        .status-syncing { background-color: #f1c40f; }
         .status-offline { background-color: #e74c3c; }
         #canvas-container { flex: 1; position: relative; background-color: #1e1e1e; width: 100%; height: 100%; }
         canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; z-index: 1; }
@@ -45,7 +46,7 @@
 
     <script>
         const SUPABASE_URL = "https://cqrvdyedsidphcbnpqdy.supabase.co"; 
-        const SUPABASE_KEY = "COLE_AQUI_SUA_CHAVE_ANON_QUE_COMECA_COM_EY"; 
+        const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNxcnZkeWVkc2lkcGhjYm5wcWR5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MTU5MjkxNzMsImV4cCI6MjAyOTUwNTE3M30.bS8p6t_5nO0tVIdZ0Lp2j97X1x5hYfT3nE0H_D4lU-8"; 
 
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
         const canvas = document.getElementById('paintCanvas');
@@ -75,6 +76,7 @@
         function updateStatus(type, message) {
             statusIndicator.className = 'status-dot';
             if (type === 'online') statusIndicator.classList.add('status-online');
+            if (type === 'syncing') statusIndicator.classList.add('status-syncing');
             if (type === 'offline') statusIndicator.classList.add('status-offline');
             statusText.innerText = message;
         }
@@ -180,9 +182,11 @@
         }
 
         async function loadElementsFromSupabase() {
+            updateStatus('syncing', 'Conectando...');
             const { data, error } = await supabase.from('quadro_elementos').select('*');
             if (error) {
-                updateStatus('offline', 'Erro de Conexão');
+                console.error("Erro Supabase:", error);
+                updateStatus('offline', 'Acesso Recusado');
             } else if (data) {
                 boardElements = data.map(item => ({
                     id: item.element_id, type: item.type, color: item.color, thickness: item.thickness,
@@ -191,6 +195,13 @@
                 render();
                 updateStatus('online', 'Sincronizado');
             }
+        }
+
+        async function saveElementToSupabase(el) {
+            const { error } = await supabase.from('quadro_elementos').insert([{
+                element_id: el.id, type: el.type, color: el.color, thickness: el.thickness, pontos: JSON.stringify(el.pontos)
+            }]);
+            if (error) console.error("Erro ao salvar:", error);
         }
 
         function subscribeToChanges() {
