@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Quadro Técnico Compartilhado</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
@@ -11,6 +11,8 @@
             margin: 0;
             padding: 0;
             user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
         }
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -94,7 +96,6 @@
             flex: 1;
             position: relative;
             background-color: #1e1e1e;
-            cursor: crosshair;
         }
         canvas {
             position: absolute;
@@ -102,6 +103,7 @@
             left: 0;
             width: 100%;
             height: 100%;
+            display: block;
         }
         #text-ghost {
             position: absolute;
@@ -132,8 +134,8 @@
 
         <div class="tool-group">
             <label>Customização</label>
-            <input type="color" id="prop-color" value="#ffffff" onchange="updateProperties()">
-            <select id="prop-thickness" onchange="updateProperties()">
+            <input type="color" id="prop-color" value="#ffffff">
+            <select id="prop-thickness">
                 <option value="2">Fino (2px)</option>
                 <option value="5" selected>Médio (5px)</option>
                 <option value="10">Grosso (10px)</option>
@@ -155,14 +157,12 @@
     </div>
 
     <script>
-        // Configurações da URL do seu projeto e campo para sua chave Real do Supabase
+        // Configurações do Supabase
         const SUPABASE_URL = "https://cqrvdyedsidphcbnpqdy.supabase.co"; 
         const SUPABASE_KEY = "COLE_AQUI_SUA_CHAVE_ANON_QUE_COMECA_COM_EY"; 
 
-        // Inicializa o cliente Supabase de forma segura
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-        // Elementos do DOM
         const canvas = document.getElementById('paintCanvas');
         const ctx = canvas.getContext('2d');
         const container = document.getElementById('canvas-container');
@@ -170,26 +170,25 @@
         const statusIndicator = document.getElementById('status-indicator');
         const statusText = document.getElementById('status-text');
 
-        // Estado do Quadro
         let currentTool = 'draw'; 
         let config = { color: '#ffffff', thickness: 5 };
         let isDrawing = false;
         let startX = 0, startY = 0;
         let activeElementId = null;
-
-        // Banco de dados local na memória
         let boardElements = [];
 
-        // Inicialização
         function init() {
             resizeCanvas();
             window.addEventListener('resize', resizeCanvas);
-            setupCanvasEvents();
+            setupInputEvents();
             setupTextEvents();
             updateStatus('online', 'Pronto');
             
             loadElementsFromSupabase();
             subscribeToChanges();
+            
+            document.getElementById('prop-color').addEventListener('change', (e) => config.color = e.target.value);
+            document.getElementById('prop-thickness').addEventListener('change', (e) => config.thickness = parseInt(e.target.value));
         }
 
         function updateStatus(type, message) {
@@ -215,12 +214,6 @@
             if (tool !== 'text') hideTextGhost();
         }
 
-        function updateProperties() {
-            config.color = document.getElementById('prop-color').value;
-            config.thickness = parseInt(document.getElementById('prop-thickness').value);
-        }
-
-        // Sistema de Desenho e Renderização
         function render() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.lineCap = 'round';
@@ -256,66 +249,77 @@
             });
         }
 
-        function setupCanvasEvents() {
-            const getPos = (e) => {
-                const rect = canvas.getBoundingClientRect();
-                return { x: e.clientX - rect.left, y: e.clientY - rect.top };
-            };
-
-            canvas.addEventListener('mousedown', (e) => {
-                if (currentTool === 'text') {
-                    showTextGhost(getPos(e));
-                    return;
-                }
-                if (currentTool === 'erase') {
-                    eraseElementAt(getPos(e));
-                    return;
-                }
-
-                isDrawing = true;
-                const pos = getPos(e);
-                startX = pos.x;
-                startY = pos.y;
-                activeElementId = 'el_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
-
-                const newElement = {
-                    id: activeElementId,
-                    type: currentTool,
-                    color: config.color,
-                    thickness: config.thickness,
-                    pontos: [pos],
-                    content: ''
-                };
-
-                boardElements.push(newElement);
-                render();
-            });
-
-            canvas.addEventListener('mousemove', (e) => {
-                if (!isDrawing) return;
-                const pos = getPos(e);
-                const el = boardElements.find(item => item.id === activeElementId);
-                if (!el) return;
-
-                if (currentTool === 'draw') {
-                    el.pontos.push(pos);
-                } else if (currentTool === 'line' || currentTool === 'rect') {
-                    if (el.pontos.length > 1) el.pontos.pop();
-                    el.pontos.push(pos);
-                }
-                render();
-            });
-
-            window.addEventListener('mouseup', () => {
-                if (!isDrawing) return;
-                isDrawing = false;
-                const el = boardElements.find(item => item.id === activeElementId);
-                if (el) saveElementToSupabase(el);
-                activeElementId = null;
-            });
+        function getEventPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            if (e.touches && e.touches.length > 0) {
+                return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
+            }
+            return { x: e.clientX - rect.left, y: e.clientY - rect.top };
         }
 
-        // Sistema de Texto
+        function onStart(e) {
+            const pos = getEventPos(e);
+            if (currentTool === 'text') {
+                showTextGhost(pos);
+                return;
+            }
+            if (currentTool === 'erase') {
+                eraseElementAt(pos);
+                return;
+            }
+
+            isDrawing = true;
+            startX = pos.x;
+            startY = pos.y;
+            activeElementId = 'el_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+
+            const newElement = {
+                id: activeElementId,
+                type: currentTool,
+                color: config.color,
+                thickness: config.thickness,
+                pontos: [pos],
+                content: ''
+            };
+
+            boardElements.push(newElement);
+            render();
+        }
+
+        function onMove(e) {
+            if (!isDrawing) return;
+            e.preventDefault();
+            const pos = getEventPos(e);
+            const el = boardElements.find(item => item.id === activeElementId);
+            if (!el) return;
+
+            if (currentTool === 'draw') {
+                el.pontos.push(pos);
+            } else if (currentTool === 'line' || currentTool === 'rect') {
+                if (el.pontos.length > 1) el.pontos.pop();
+                el.pontos.push(pos);
+            }
+            render();
+        }
+
+        function onEnd() {
+            if (!isDrawing) return;
+            isDrawing = false;
+            const el = boardElements.find(item => item.id === activeElementId);
+            if (el) saveElementToSupabase(el);
+            activeElementId = null;
+        }
+
+        function setupInputEvents() {
+            canvas.addEventListener('mousedown', onStart);
+            canvas.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onEnd);
+
+            canvas.addEventListener('touchstart', onStart, { passive: false });
+            canvas.addEventListener('touchmove', onMove, { passive: false });
+            window.addEventListener('touchend', onEnd);
+        }
+
         function showTextGhost(pos) {
             textGhost.style.display = 'block';
             textGhost.style.left = pos.x + 'px';
@@ -361,14 +365,13 @@
             hideTextGhost();
         }
 
-        // Borracha
         function eraseElementAt(pos) {
             let foundIndex = -1;
             for (let i = boardElements.length - 1; i >= 0; i--) {
                 const el = boardElements[i];
                 if (el.type === 'draw' || el.type === 'line') {
                     for (let p of el.pontos) {
-                        if (Math.hypot(p.x - pos.x, p.y - pos.y) < el.thickness + 10) {
+                        if (Math.hypot(p.x - pos.x, p.y - pos.y) < el.thickness + 15) {
                             foundIndex = i;
                             break;
                         }
@@ -378,11 +381,11 @@
                     const p2 = el.pontos[el.pontos.length - 1];
                     const minX = Math.min(p1.x, p2.x), maxX = Math.max(p1.x, p2.x);
                     const minY = Math.min(p1.y, p2.y), maxY = Math.max(p1.y, p2.y);
-                    if (pos.x >= minX - 5 && pos.x <= maxX + 5 && pos.y >= minY - 5 && pos.y <= maxY + 5) {
+                    if (pos.x >= minX - 10 && pos.x <= maxX + 10 && pos.y >= minY - 10 && pos.y <= maxY + 10) {
                         foundIndex = i;
                     }
                 } else if (el.type === 'text' && el.pontos.length > 0) {
-                    if (Math.hypot(el.pontos[0].x - pos.x, el.pontos[0].y - pos.y) < 40) {
+                    if (Math.hypot(el.pontos[0].x - pos.x, el.pontos[0].y - pos.y) < 50) {
                         foundIndex = i;
                     }
                 }
@@ -407,13 +410,12 @@
             }
         }
 
-        // Integração Remota com o Supabase
         async function loadElementsFromSupabase() {
             updateStatus('syncing', 'Buscando dados...');
             const { data, error } = await supabase.from('quadro_elementos').select('*');
             if (error) {
                 console.error(error);
-                updateStatus('offline', 'Erro ao carregar dados. Verifique a chave.');
+                updateStatus('offline', 'Erro ao carregar dados.');
             } else if (data) {
                 boardElements = data.map(item => ({
                     id: item.element_id,
@@ -477,7 +479,6 @@
             .subscribe();
         }
 
-        // Executa ao carregar a página
         window.onload = init;
     </script>
 </body>
